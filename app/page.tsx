@@ -41,7 +41,7 @@ type Spot = {
   name: string;    // スポット名
   weather: string; // 天気の区分（晴れの日 / 雨の日 / どちらでも / 期間限定）
   access: string;  // 行き方・所要（任意）
-  cost: number;    // 費用のめやす（円・家族4人ぶん）
+  cost: number;    // 大人1人ぶんの料金（円）。家族の合計は設定の家族構成から計算する
   done: boolean;   // 行ったか
   addedOn: string; // 登録した日 YYYY-MM-DD（入力せず自動で入る）
 };
@@ -51,6 +51,27 @@ type Filter = "open" | "done" | "all";
 
 const KEY = "odekake-spots";
 const NAME_KEY = "odekake-appname";
+const FAMILY_KEY = "odekake-family";
+
+/** 家族構成。ここを変えると、一覧の費用がまとめて変わる */
+type Family = {
+  adults: number;   // 大人の人数
+  kidsPaid: number; // 子ども（料金がかかる）の人数
+  kidsFree: number; // 子ども（無料）の人数
+  kidRate: number;  // 子ども料金のめやす（大人の何%か）
+};
+
+/** 初期値は 大人2・料金がかかる子1・無料の子1（3歳と1歳の想定） */
+const DEFAULT_FAMILY: Family = { adults: 2, kidsPaid: 1, kidsFree: 1, kidRate: 50 };
+
+/** 大人1人ぶんの料金から、この家族の合計を出す */
+const totalCost = (adultCost: number, f: Family) =>
+  Math.round(adultCost * f.adults + adultCost * (f.kidRate / 100) * f.kidsPaid);
+
+/** 「大人2人・子ども1人（大人の50%）」のような1行の説明 */
+const familyText = (f: Family) =>
+  `大人${f.adults}人・子ども${f.kidsPaid}人（大人の${f.kidRate}%）` +
+  (f.kidsFree > 0 ? `・無料の子ども${f.kidsFree}人` : "");
 
 /** 画面の型ごとの言葉。ここを直せば画面じゅうの文言が揃って変わる */
 const TEXT = {
@@ -90,18 +111,18 @@ const costText = (yen: number) => (yen <= 0 ? "無料" : `${yen.toLocaleString()
  */
 const SAMPLE: Spot[] = [
   { id: "s01", name: "屋根つき広場のある総合公園",       weather: "どちらでも", access: "車15分・駐車場あり（無料）",        cost: 0,    done: false, addedOn: ago(1)  },
-  { id: "s02", name: "駅ビルの屋内あそび場",             weather: "雨の日",     access: "電車15分・ベビーカーで入れる",      cost: 2400, done: false, addedOn: ago(0)  },
+  { id: "s02", name: "駅ビルの屋内あそび場",             weather: "雨の日",     access: "電車15分・ベビーカーで入れる",      cost: 800,  done: false, addedOn: ago(0)  },
   { id: "s03", name: "川沿いの大型公園（ふわふわドーム）", weather: "晴れの日",   access: "車25分・駐車場あり（無料）",        cost: 0,    done: false, addedOn: ago(2)  },
   { id: "s04", name: "図書館の絵本コーナーと工作室",       weather: "雨の日",     access: "徒歩10分・ベビーカー置き場あり",    cost: 0,    done: false, addedOn: ago(4)  },
-  { id: "s05", name: "海辺の芝生広場と長いすべり台",       weather: "晴れの日",   access: "車40分・駐車場あり（1日500円）",    cost: 500,  done: false, addedOn: ago(6)  },
-  { id: "s06", name: "水族館（屋内と屋外の両方あり）",     weather: "どちらでも", access: "電車30分＋徒歩10分",               cost: 4200, done: false, addedOn: ago(7)  },
-  { id: "s07", name: "ショッピングモールのキッズパーク",   weather: "雨の日",     access: "車20分・駐車場3時間無料",          cost: 1600, done: false, addedOn: ago(9)  },
-  { id: "s08", name: "牧場のふれあいコーナー",            weather: "晴れの日",   access: "車50分・駐車場あり（無料）",        cost: 2800, done: false, addedOn: ago(11) },
+  { id: "s05", name: "海辺の芝生広場と長いすべり台",       weather: "晴れの日",   access: "車40分・駐車場あり（1日500円）",    cost: 0,    done: false, addedOn: ago(6)  },
+  { id: "s06", name: "水族館（屋内と屋外の両方あり）",     weather: "どちらでも", access: "電車30分＋徒歩10分",               cost: 1800, done: false, addedOn: ago(7)  },
+  { id: "s07", name: "ショッピングモールのキッズパーク",   weather: "雨の日",     access: "車20分・駐車場3時間無料",          cost: 600,  done: false, addedOn: ago(9)  },
+  { id: "s08", name: "牧場のふれあいコーナー",            weather: "晴れの日",   access: "車50分・駐車場あり（無料）",        cost: 1000, done: false, addedOn: ago(11) },
   { id: "s09", name: "小川で水あそびできる公園",          weather: "晴れの日",   access: "自転車15分・日かげが少ない",        cost: 0,    done: true,  addedOn: ago(15) },
-  { id: "s10", name: "公園に来る移動動物園（春と秋だけ）", weather: "期間限定",   access: "車25分・駐車場あり（無料）",        cost: 800,  done: false, addedOn: ago(12) },
+  { id: "s10", name: "公園に来る移動動物園（春と秋だけ）", weather: "期間限定",   access: "車25分・駐車場あり（無料）",        cost: 400,  done: false, addedOn: ago(12) },
   { id: "s11", name: "児童館の乳幼児ひろば",              weather: "雨の日",     access: "自転車8分・下の子と行きやすい",     cost: 0,    done: true,  addedOn: ago(13) },
-  { id: "s12", name: "農産物直売所の遊具コーナー",         weather: "どちらでも", access: "車25分・駐車場あり（無料）",        cost: 300,  done: true,  addedOn: ago(17) },
-  { id: "s13", name: "市民プールの幼児コーナー（夏だけ）", weather: "期間限定",   access: "車15分・駐車場あり（1回500円）",    cost: 1200, done: true,  addedOn: ago(19) },
+  { id: "s12", name: "農産物直売所の遊具コーナー",         weather: "どちらでも", access: "車25分・駐車場あり（無料）",        cost: 0,    done: true,  addedOn: ago(17) },
+  { id: "s13", name: "市民プールの幼児コーナー（夏だけ）", weather: "期間限定",   access: "車15分・駐車場あり（1回500円）",    cost: 400,  done: true,  addedOn: ago(19) },
   { id: "s14", name: "駅前広場のイルミネーション（冬）",   weather: "期間限定",   access: "電車10分・夕方から",               cost: 0,    done: true,  addedOn: ago(21) },
 ];
 
@@ -126,6 +147,7 @@ function grouped(list: Spot[], filter: Filter): Group[] {
 export default function Home() {
   const [items, setItems] = useState<Spot[]>([]);
   const [appName, setAppName] = useState("おでかけ候補");
+  const [family, setFamily] = useState<Family>(DEFAULT_FAMILY);
   const [loaded, setLoaded] = useState(false);
 
   const [view, setView] = useState<View>("list");
@@ -142,6 +164,8 @@ export default function Home() {
       setItems(raw ? (JSON.parse(raw) as Spot[]) : SAMPLE);
       const n = localStorage.getItem(NAME_KEY);
       if (n) setAppName(n);
+      const f = localStorage.getItem(FAMILY_KEY);
+      if (f) setFamily({ ...DEFAULT_FAMILY, ...(JSON.parse(f) as Partial<Family>) });
     } catch {
       setItems(SAMPLE);
     }
@@ -152,7 +176,8 @@ export default function Home() {
     if (!loaded) return;
     localStorage.setItem(KEY, JSON.stringify(items));
     localStorage.setItem(NAME_KEY, appName);
-  }, [items, appName, loaded]);
+    localStorage.setItem(FAMILY_KEY, JSON.stringify(family));
+  }, [items, appName, family, loaded]);
 
   // 見本データのまま触っていない状態か（1か所でも足す・消すと false になる）
   const isSample = items.length === SAMPLE.length && items.every((i) => i.id.startsWith("s"));
@@ -351,7 +376,9 @@ export default function Home() {
                             {r.access && <div className="row-sub">{r.access}</div>}
                           </div>
                           <div className="row-meta">
-                            <span className={"badge" + (r.cost <= 0 ? " badge-ok" : "")}>{costText(r.cost)}</span>
+                            <span className={"badge" + (r.cost <= 0 ? " badge-ok" : "")}>
+                              {costText(totalCost(r.cost, family))}
+                            </span>
                             {!(LAYOUT === "stage" && filter === "open") && (
                               <span className="badge">{r.weather}</span>
                             )}
@@ -368,6 +395,10 @@ export default function Home() {
                   ))
                 )}
               </div>
+              <p className="note">
+                費用は<b>{familyText(family)}</b>で計算しています（駐車場代は含みません。行き方の欄に書いてあります）。
+                家族構成は設定から変えられます。
+              </p>
               <p className="note">データはこの端末のブラウザにだけ保存されます。外部には送信されません。</p>
             </>
           )}
@@ -394,13 +425,15 @@ export default function Home() {
                     </select>
                   </div>
                   <div>
-                    <label className="label" htmlFor="f-cost">費用のめやす（円）</label>
+                    <label className="label" htmlFor="f-cost">大人1人の料金（円）</label>
                     <input id="f-cost" className="field" type="number" min="0" step="100" value={form.cost}
                       onChange={(e) => setForm({ ...form, cost: e.target.value })}
                       placeholder="0" />
                   </div>
                 </div>
-                <span className="hint">費用は家族4人ぶんの合計（入場料＋駐車場代）。無料なら 0 のままで大丈夫です</span>
+                <span className="hint">
+                  大人1人ぶんの入場料を入れます。一覧には{familyText(family)}の合計が出ます。無料なら 0 のままで大丈夫です
+                </span>
               </div>
 
               <div className="form-row">
@@ -434,6 +467,36 @@ export default function Home() {
                 <input id="f-app" className="field" value={appName}
                   onChange={(e) => setAppName(e.target.value)} />
                 <span className="hint">左上に表示されます。変えるとすぐ反映されます</span>
+              </div>
+
+              <div className="form-row">
+                <label className="label">家族構成</label>
+                <div className="inline">
+                  <div>
+                    <label className="label" htmlFor="f-adults">大人（人）</label>
+                    <input id="f-adults" className="field" type="number" min="0" max="10" value={family.adults}
+                      onChange={(e) => setFamily({ ...family, adults: Math.max(0, Number(e.target.value) || 0) })} />
+                  </div>
+                  <div>
+                    <label className="label" htmlFor="f-kids">子ども・料金がかかる（人）</label>
+                    <input id="f-kids" className="field" type="number" min="0" max="10" value={family.kidsPaid}
+                      onChange={(e) => setFamily({ ...family, kidsPaid: Math.max(0, Number(e.target.value) || 0) })} />
+                  </div>
+                  <div>
+                    <label className="label" htmlFor="f-kids-free">子ども・無料（人）</label>
+                    <input id="f-kids-free" className="field" type="number" min="0" max="10" value={family.kidsFree}
+                      onChange={(e) => setFamily({ ...family, kidsFree: Math.max(0, Number(e.target.value) || 0) })} />
+                  </div>
+                  <div>
+                    <label className="label" htmlFor="f-rate">子ども料金のめやす（%）</label>
+                    <input id="f-rate" className="field" type="number" min="0" max="100" step="10" value={family.kidRate}
+                      onChange={(e) => setFamily({ ...family, kidRate: Math.min(100, Math.max(0, Number(e.target.value) || 0)) })} />
+                  </div>
+                </div>
+                <span className="hint">
+                  いまの設定：{familyText(family)}。一覧の費用がこの人数で計算し直されます。
+                  下の子が無料の年齢のうちは「子ども・無料」に入れておきます
+                </span>
               </div>
 
               <div className="form-row">
