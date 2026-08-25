@@ -44,6 +44,7 @@ type Spot = {
   cost: number;    // 大人1人ぶんの料金（円）。家族の合計は設定の家族構成から計算する
   done: boolean;   // 行ったか
   addedOn: string; // 登録した日 YYYY-MM-DD（入力せず自動で入る）
+  link?: string;   // 元の記事のURL（イベントを取り込んだときだけ自動で入る）
 };
 
 type View = "list" | "new" | "settings";
@@ -52,6 +53,28 @@ type Filter = "open" | "done" | "all";
 const KEY = "odekake-spots";
 const NAME_KEY = "odekake-appname";
 const FAMILY_KEY = "odekake-family";
+const AREA_KEY = "odekake-area";
+const FEED_KEY = "odekake-feed";
+
+/** 住んでいるエリア。イベントの取り込みと、行き先の目印に使う */
+type Area = { pref: string; city: string };
+const DEFAULT_AREA: Area = { pref: "", city: "" };
+
+const PREFS = [
+  "北海道", "青森県", "岩手県", "宮城県", "秋田県", "山形県", "福島県",
+  "茨城県", "栃木県", "群馬県", "埼玉県", "千葉県", "東京都", "神奈川県",
+  "新潟県", "富山県", "石川県", "福井県", "山梨県", "長野県", "岐阜県",
+  "静岡県", "愛知県", "三重県", "滋賀県", "京都府", "大阪府", "兵庫県",
+  "奈良県", "和歌山県", "鳥取県", "島根県", "岡山県", "広島県", "山口県",
+  "徳島県", "香川県", "愛媛県", "高知県", "福岡県", "佐賀県", "長崎県",
+  "熊本県", "大分県", "宮崎県", "鹿児島県", "沖縄県",
+];
+
+/** 「東京都 練馬区」のような1行。未設定なら空 */
+const areaText = (a: Area) => [a.pref, a.city].filter(Boolean).join(" ");
+
+/** 取り込みの上限。ここを増やす前に、取り込み元の負荷を考えること */
+const IMPORT_MAX = 20;
 
 /** 家族構成。ここを変えると、一覧の費用がまとめて変わる */
 type Family = {
@@ -148,6 +171,11 @@ export default function Home() {
   const [items, setItems] = useState<Spot[]>([]);
   const [appName, setAppName] = useState("おでかけ候補");
   const [family, setFamily] = useState<Family>(DEFAULT_FAMILY);
+  const [area, setArea] = useState<Area>(DEFAULT_AREA);
+  const [feedUrl, setFeedUrl] = useState("");
+  const [onlyArea, setOnlyArea] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState("");
   const [loaded, setLoaded] = useState(false);
 
   const [view, setView] = useState<View>("list");
@@ -166,6 +194,10 @@ export default function Home() {
       if (n) setAppName(n);
       const f = localStorage.getItem(FAMILY_KEY);
       if (f) setFamily({ ...DEFAULT_FAMILY, ...(JSON.parse(f) as Partial<Family>) });
+      const a = localStorage.getItem(AREA_KEY);
+      if (a) setArea({ ...DEFAULT_AREA, ...(JSON.parse(a) as Partial<Area>) });
+      const u = localStorage.getItem(FEED_KEY);
+      if (u) setFeedUrl(u);
     } catch {
       setItems(SAMPLE);
     }
@@ -177,7 +209,9 @@ export default function Home() {
     localStorage.setItem(KEY, JSON.stringify(items));
     localStorage.setItem(NAME_KEY, appName);
     localStorage.setItem(FAMILY_KEY, JSON.stringify(family));
-  }, [items, appName, family, loaded]);
+    localStorage.setItem(AREA_KEY, JSON.stringify(area));
+    localStorage.setItem(FEED_KEY, feedUrl);
+  }, [items, appName, family, area, feedUrl, loaded]);
 
   // 見本データのまま触っていない状態か（1か所でも足す・消すと false になる）
   const isSample = items.length === SAMPLE.length && items.every((i) => i.id.startsWith("s"));
@@ -251,6 +285,53 @@ export default function Home() {
     setView("new");
   }
 
+  /**
+   * 設定した取り込み元から、イベントを「期間限定」の候補として取り込む。
+   * ボタンを押したときだけ動く（自動では動かない）。1回に取り込むのは IMPORT_MAX 件まで。
+   */
+  async function importEvents() {
+    const url = feedUrl.trim();
+    if (!url || importing) return;
+    setImporting(true);
+    setImportMsg("取り込んでいます…");
+    try {
+      const res = await fetch(`/api/events?url=${encodeURIComponent(url)}`);
+      const data: { items?: { title: string; link: string; date: string }[]; error?: string } = await res.json();
+      if (!res.ok || !data.items) {
+        setImportMsg(data.error ?? "取り込めませんでした。");
+        return;
+      }
+      const key = area.city || area.pref;
+      const candidates = data.items
+        .filter((e) => !onlyArea || !key || e.title.includes(key))
+        .filter((e) => !items.some((i) => i.name === e.title))
+        .slice(0, IMPORT_MAX);
+
+      if (candidates.length === 0) {
+        setImportMsg("新しく取り込めるイベントはありませんでした（すべて登録済みか、しぼり込みで残りませんでした）。");
+        return;
+      }
+      const added: Spot[] = candidates.map((e, n) => ({
+        id: `${Date.now()}-${n}`,
+        name: e.title,
+        weather: "期間限定",
+        access: areaText(area) ? `${areaText(area)}のお知らせから取り込み` : "取り込んだイベント",
+        cost: 0,
+        done: false,
+        addedOn: e.date || today(),
+        link: e.link,
+      }));
+      setItems([...items, ...added]);
+      setImportMsg(
+        `${added.length}${UNIT}取り込みました。費用と天気の区分は「期間限定・無料」で入れてあるので、一覧から直してください。`
+      );
+    } catch {
+      setImportMsg("取り込めませんでした。通信を確かめて、もう一度試してください。");
+    } finally {
+      setImporting(false);
+    }
+  }
+
   const toggle = (id: string) => setItems(items.map((i) => (i.id === id ? { ...i, done: !i.done } : i)));
   const remove = (id: string) => setItems(items.filter((i) => i.id !== id));
 
@@ -263,7 +344,7 @@ export default function Home() {
   const titles: { [K in View]: [string, string] } = {
     list: ["一覧", TEXT.sub],
     new: [editing ? "編集" : "新規登録", "入力して保存すると、一覧に追加されます"],
-    settings: ["設定", "表示名の変更と、データの初期化"],
+    settings: ["設定", "エリア・イベントの取り込み・家族構成・データの初期化"],
   };
 
   return (
@@ -272,7 +353,7 @@ export default function Home() {
       <nav className="side">
         <div className="side-brand">
           <div className="n">{appName}</div>
-          <div className="s">この端末に保存</div>
+          <div className="s">{areaText(area) || "この端末に保存"}</div>
         </div>
         <div className="side-label">メニュー</div>
         <div className="side-nav">
@@ -383,6 +464,9 @@ export default function Home() {
                               <span className="badge">{r.weather}</span>
                             )}
                             <span className="row-time">{r.addedOn.slice(5).replace("-", "/")}</span>
+                            {r.link && (
+                              <a className="btn-ghost" href={r.link} target="_blank" rel="noreferrer">元の記事</a>
+                            )}
                             <button className="btn-ghost" onClick={() => startEdit(r)}>編集</button>
                             <button className="btn-ghost" onClick={() => toggle(r.id)}>
                               {r.done ? TEXT.toBack : TEXT.toTo}
@@ -467,6 +551,55 @@ export default function Home() {
                 <input id="f-app" className="field" value={appName}
                   onChange={(e) => setAppName(e.target.value)} />
                 <span className="hint">左上に表示されます。変えるとすぐ反映されます</span>
+              </div>
+
+              <div className="form-row">
+                <label className="label">エリア</label>
+                <div className="inline">
+                  <div>
+                    <label className="label" htmlFor="f-pref">都道府県</label>
+                    <select id="f-pref" className="select" value={area.pref}
+                      onChange={(e) => setArea({ ...area, pref: e.target.value })}>
+                      <option value="">選んでください</option>
+                      {PREFS.map((x) => <option key={x}>{x}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="label" htmlFor="f-city">市区町村</label>
+                    <input id="f-city" className="field" value={area.city}
+                      onChange={(e) => setArea({ ...area, city: e.target.value })}
+                      placeholder="例：練馬区" />
+                  </div>
+                </div>
+                <span className="hint">
+                  位置情報は使いません。ここで選んだエリアは、左上の表示と、下のイベント取り込みのしぼり込みに使います
+                </span>
+              </div>
+
+              <div className="form-row">
+                <label className="label" htmlFor="f-feed">イベント情報の取り込み元（RSS / Atom のURL）</label>
+                <input id="f-feed" className="field" value={feedUrl}
+                  onChange={(e) => { setFeedUrl(e.target.value); setImportMsg(""); }}
+                  placeholder="https://example.lg.jp/kosodate.xml" />
+                <span className="hint">
+                  お住まいの自治体サイトで「RSS」のページを開き、子育て・イベントのフィードのURLを貼ります。
+                  https で始まるものだけ取り込めます
+                </span>
+                <div className="inline">
+                  <button className="btn" onClick={importEvents} disabled={!feedUrl.trim() || importing}>
+                    {importing ? "取り込み中…" : "いま取り込む"}
+                  </button>
+                  <label className="label" htmlFor="f-only">
+                    <input id="f-only" type="checkbox" checked={onlyArea}
+                      onChange={(e) => setOnlyArea(e.target.checked)} />
+                    {" "}{areaText(area) ? `「${area.city || area.pref}」を含むものだけ` : "エリア名を含むものだけ"}
+                  </label>
+                </div>
+                {importMsg && <div className="notice">{importMsg}</div>}
+                <span className="hint">
+                  押したときだけ取り込みます（自動では動きません）。1回に取り込むのは{IMPORT_MAX}{UNIT}まで。
+                  取り込んだものは「期間限定・無料」で入るので、費用と天気の区分は一覧から直してください
+                </span>
               </div>
 
               <div className="form-row">
