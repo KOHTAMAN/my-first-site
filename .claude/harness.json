@@ -1,0 +1,8 @@
+{
+  "使わない言葉": ["業務効率化", "シームレス", "革新的", "最先端", "ワンストップ", "ソリューション", "スムーズに"],
+  "書き足すだけのファイル": ["docs/business/customer-voice.md", "docs/business/decisions.md"],
+  "要約のファイル": "docs/business/hot.md",
+  "要約の上限行数": 40,
+  "検査するフォルダ": ["app", "components"],
+  "消してよいフォルダ": [".next", "node_modules", "out", ".tmp"]
+}
