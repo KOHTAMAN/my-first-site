@@ -29,7 +29,7 @@ Claude Code が**毎回の作業の最初に必ず読む**ファイルです。
 ### このページでしてほしいこと（1つだけ）とボタンの行き先
 
 - してほしいこと: カレンダーに書き込む
-- ボタンの行き先:
+- ボタンの行き先: https://calendar.google.com/calendar/render?action=TEMPLATE（Google カレンダーの予定作成ページ）
 
 ### 使う言葉・使わない言葉
 
